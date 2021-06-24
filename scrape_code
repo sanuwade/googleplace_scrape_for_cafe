@@ -1,0 +1,137 @@
+import pandas as pd
+import requests
+import json
+import time
+
+#urls
+root = 'https://maps.googleapis.com/maps/api/place/'
+
+
+# TODO coordinate list
+# TODO: Price(atleast $$), Rating(>4.5), phone_number
+
+# Parameters
+coordinates = ['-7.9678271,112.6344841'] #abu amad
+keywords = ['kopi', 'coffee', 'cafe']
+min_price = '2'
+additionals = []
+radius = '1000' #metres
+api_key = '' #insert your Places API
+
+search_result_columns = ['name', 'business_status', 'rating', 'types', 'vicinity']
+detail_result_columns = ['phone_number', 'opening_hours', 'website', 'price_level']
+dtl_fields = 'international_phone_number,opening_hours/weekday_text,website,price_level'
+result_columns = search_result_columns + detail_result_columns
+template = pd.DataFrame(columns=result_columns)
+
+#initial voids
+all_results_list = []
+error_count = 0
+current_results = template.copy()
+
+for coordinate in coordinates:
+  
+  if error_count >= 5:
+    break
+
+  for keyword in keywords:
+    
+
+    if error_count >= 5:
+      break
+    if len(additionals) > 0:
+      for additional in additionals:
+        keyword += '+{}'.format(additional)
+
+    nextpage = True
+    search_par = '{}&location={}&radius={}&keyword={}&minprice={}'.format(api_key, coordinate, radius, keyword, min_price)
+    url = '{}nearbysearch/json?key={}'.format(root,search_par)
+
+    while nextpage:
+      if error_count >= 5:
+        break
+
+      try:
+        respon = requests.get(url)
+        load = json.loads(respon.text)
+
+        if load['status'] == 'OK':
+          results = load['results']
+
+          for result in results:
+            if not result['name'] in list(current_results['name']):
+              tmp = template.copy()
+
+              for col in search_result_columns:
+                try:
+                  tmp.loc[0, col] = result[col]
+                except:
+                  pass
+
+              place_id = str(result['place_id'])
+              detail_par = '{}&place_id={}&fields={}'.format(api_key, place_id, dtl_fields)
+              dtl_url = '{}details/json?key={}'.format(root, detail_par)
+
+              try:
+                dtl_respon = requests.get(dtl_url)
+                dtl_load = json.loads(dtl_respon.text)
+
+                if dtl_load['status'] == 'OK':
+                  dtl_result = dtl_load['result']
+                  try:
+                    tmp.loc[0, 'phone_number'] = dtl_result['international_phone_number']
+                  except:
+                    pass
+                  try:
+                    tmp.loc[0, 'opening_hours'] = dtl_result['opening_hours']['weekday_text']
+                  except:
+                    pass
+                  for col in ['website', 'price_level']
+                    try:
+                      tmp.loc[0, 'col'] = dtl_result['price_level']
+                    except:
+                      pass
+
+                else:
+                  print('failed_to_load\n name:{}\n place_id: {}'.format(result['name'], place_id))
+                  print(dtl_load)
+                  print('')
+                  error_count +=1
+                  
+              except:
+                print('something is wrong in loading detail or what comes after\n name:{}\n place_id: {}'.format(result['name'], place_id))
+                print(dtl_load)
+                print('')
+                error_count +=1
+                continue  
+
+              all_results_list.append(tmp)
+
+            else:
+              pass
+    
+          if 'next_page_token' not in load:
+            nextpage = False
+          else:
+            next_page_token = str(load['next_page_token'])
+            url = '{}nearbysearch/json?key={}&pagetoken={}'.format(root,api_key, next_page_token)
+            time.sleep(1)
+        else:
+          print('failed to load\n url:{}'.format(url))
+          print(load)
+          print('')
+          nextpage = False
+          error_count += 1
+      except:
+        print('something wrong in loading url or what comes after')
+        print(load)
+        print('')
+        nextpage = False
+        error_count = 5
+        continue
+
+    current_results = pd.concat(all_results_list, ignore_index=True).drop_duplicates('name')
+
+
+
+# final_results.to_csv('final_results.csv')
